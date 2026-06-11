@@ -16,6 +16,7 @@ import { writeSecureFile, mkdirSecure } from './file-permissions';
 import { resolveConfig, ensureStateDir, readVersionHash, stateRoot } from './config';
 import { parseProxyConfig, computeConfigHash, ProxyConfigError } from './proxy-config';
 import { redactProxyUrl } from './proxy-redact';
+import { VERSION } from './version';
 
 const config = resolveConfig();
 const IS_WINDOWS = process.platform === 'win32';
@@ -53,7 +54,17 @@ export function resolveServerScript(
   );
 }
 
-const SERVER_SCRIPT = resolveServerScript();
+// Resolved lazily and tolerant of absence: a compiled standalone binary hosts
+// the server in-process via the `__server` subcommand (see startServer), so it
+// has no server.ts on disk. Only the dev/source path and an explicit
+// BROWSE_SERVER_SCRIPT override actually need this.
+const SERVER_SCRIPT: string | null = (() => {
+  try {
+    return resolveServerScript();
+  } catch {
+    return null;
+  }
+})();
 
 /**
  * On Windows, resolve the Node.js-compatible server bundle.
@@ -76,6 +87,19 @@ export function resolveNodeServerScript(
   }
 
   return null;
+}
+
+/**
+ * Locate the compiled sidecar server binary shipped next to a standalone CLI
+ * (Homebrew / release-tarball installs build `dist/abx-server` alongside the
+ * `abx` binary). Returns null in dev, where the server runs from source via
+ * bun instead. Keeping the server a separate binary lets the CLI stay a thin,
+ * Playwright-free client that compiles cleanly.
+ */
+function resolveServerBinary(execPath: string = process.execPath): string | null {
+  if (!import.meta.dir.includes('$bunfs')) return null; // dev: use bun + source
+  const adjacent = path.resolve(path.dirname(execPath), IS_WINDOWS ? 'abx-server.exe' : 'abx-server');
+  return fs.existsSync(adjacent) ? adjacent : null;
 }
 
 const NODE_SERVER_SCRIPT = IS_WINDOWS ? resolveNodeServerScript() : null;
@@ -240,8 +264,23 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
       `${extraEnvStr})}).unref()`;
     Bun.spawnSync(['node', '-e', launcherCode], { stdio: ['ignore', 'ignore', 'ignore'] });
   } else {
-    // macOS/Linux: Bun.spawn + unref works correctly
-    proc = Bun.spawn(['bun', 'run', SERVER_SCRIPT], {
+    // macOS/Linux: Bun.spawn + unref works correctly. A standalone install
+    // ships a compiled `abx-server` sidecar next to the CLI — spawn it directly
+    // (no bun runtime or source tree needed). Dev and an explicit
+    // BROWSE_SERVER_SCRIPT override run the script through bun.
+    const serverBin = resolveServerBinary();
+    let serverCmd: string[];
+    if (serverBin && !process.env.BROWSE_SERVER_SCRIPT) {
+      serverCmd = [serverBin];
+    } else if (SERVER_SCRIPT) {
+      serverCmd = ['bun', 'run', SERVER_SCRIPT];
+    } else {
+      throw new Error(
+        'Cannot locate the abx server: no abx-server binary next to the CLI and no server.ts source. ' +
+          'Reinstall abx, or set BROWSE_SERVER_SCRIPT to a server.ts path.',
+      );
+    }
+    proc = Bun.spawn(serverCmd, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...extraEnv },
     });
@@ -903,8 +942,50 @@ async function dispatchLive(args: string[]): Promise<never> {
   process.exit(code ?? 0);
 }
 
+/**
+ * Download the Playwright Chromium build abx drives. The compiled binary has
+ * no node_modules of its own, so we shell out to whichever JS runtime is on
+ * PATH (`bunx`/`npx`) to run Playwright's own installer. Falls back to clear
+ * guidance — including the ABX_CHROMIUM_PATH escape hatch to reuse an existing
+ * Chrome — when neither runtime is present.
+ */
+function installBrowser(): number {
+  const runners: Array<[string, string[]]> = [
+    ['bunx', ['playwright', 'install', 'chromium']],
+    ['npx', ['--yes', 'playwright', 'install', 'chromium']],
+  ];
+  for (const [bin, args] of runners) {
+    const which = Bun.spawnSync(['sh', '-c', `command -v ${bin}`]);
+    if (which.exitCode !== 0) continue;
+    console.error(`[abx] installing Chromium via ${bin}…`);
+    const res = Bun.spawnSync([bin, ...args], { stdout: 'inherit', stderr: 'inherit' });
+    if (res.exitCode === 0) {
+      console.error('[abx] Chromium ready. Run `abx goto <url>` to verify.');
+      return 0;
+    }
+    console.error(`[abx] ${bin} playwright install failed (exit ${res.exitCode}).`);
+    return res.exitCode ?? 1;
+  }
+  console.error(
+    '[abx] No bun or npx on PATH to fetch Chromium. Options:\n' +
+      '  • install bun (brew install bun) or node, then re-run `abx install-browser`\n' +
+      '  • or point abx at an existing browser:\n' +
+      '      export ABX_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"',
+  );
+  return 1;
+}
+
 async function main() {
   const rawArgs = process.argv.slice(2);
+
+  if (rawArgs[0] === '--version' || rawArgs[0] === '-V' || rawArgs[0] === 'version') {
+    console.log(VERSION);
+    process.exit(0);
+  }
+
+  if (rawArgs[0] === 'install-browser' || rawArgs[0] === 'setup') {
+    process.exit(installBrowser());
+  }
 
   if (rawArgs[0] === 'live') {
     await dispatchLive(rawArgs.slice(1));

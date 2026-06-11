@@ -2,13 +2,19 @@
   "name": "abx",
   "version": "0.1.0",
   "description": "Fast headless browser CLI for AI coding agents. Persistent Bun daemon over Playwright Chromium.",
-  "private": true,
   "type": "module",
+  "license": "MIT",
+  "author": "Edi Hasaj",
+  "homepage": "https://github.com/edihasaj/abx",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edihasaj/abx.git"
+  },
   "bin": {
     "abx": "./dist/abx"
   },
   "scripts": {
-    "build": "bun build --compile src/cli.ts --outfile dist/abx && bun build src/live.ts --target node --format esm --packages external --outfile dist/live.mjs && chmod +x dist/abx",
+    "build": "bun build --compile src/cli.ts --outfile dist/abx && bun build --compile --external electron --external chromium-bidi src/server.ts --outfile dist/abx-server && bun build src/live.ts --target node --format esm --packages external --outfile dist/live.mjs && chmod +x dist/abx dist/abx-server",
     "dev": "bun run src/cli.ts",
     "server": "bun run src/server.ts"
   },
