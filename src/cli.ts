@@ -41,16 +41,25 @@ export function resolveServerScript(
     }
   }
 
-  // Compiled binary: derive the source tree from browse/dist/browse
+  // Standalone install (compiled CLI): the server ships as a `bun`-runnable
+  // bundle next to its vendored Playwright. Playwright can't be statically
+  // compiled (it reads its package files from node_modules at runtime), so the
+  // server stays a bundle run via bun rather than a self-contained binary.
+  // Homebrew lays it out as bin/abx + libexec/abx-server.js (+ libexec/node_modules).
   if (execPath) {
-    const adjacent = path.resolve(path.dirname(execPath), '..', 'src', 'server.ts');
-    if (fs.existsSync(adjacent)) {
-      return adjacent;
+    const dir = path.dirname(execPath);
+    const candidates = [
+      path.resolve(dir, '..', 'libexec', 'abx-server.js'), // Homebrew layout
+      path.resolve(dir, 'abx-server.js'), // flat tarball layout
+      path.resolve(dir, '..', 'src', 'server.ts'), // legacy in-tree
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
     }
   }
 
   throw new Error(
-    'Cannot find server.ts. Set BROWSE_SERVER_SCRIPT env or run from the browse source tree.'
+    'Cannot find the abx server bundle. Reinstall abx, or set BROWSE_SERVER_SCRIPT to a server.ts / abx-server.js path.'
   );
 }
 
@@ -87,19 +96,6 @@ export function resolveNodeServerScript(
   }
 
   return null;
-}
-
-/**
- * Locate the compiled sidecar server binary shipped next to a standalone CLI
- * (Homebrew / release-tarball installs build `dist/abx-server` alongside the
- * `abx` binary). Returns null in dev, where the server runs from source via
- * bun instead. Keeping the server a separate binary lets the CLI stay a thin,
- * Playwright-free client that compiles cleanly.
- */
-function resolveServerBinary(execPath: string = process.execPath): string | null {
-  if (!import.meta.dir.includes('$bunfs')) return null; // dev: use bun + source
-  const adjacent = path.resolve(path.dirname(execPath), IS_WINDOWS ? 'abx-server.exe' : 'abx-server');
-  return fs.existsSync(adjacent) ? adjacent : null;
 }
 
 const NODE_SERVER_SCRIPT = IS_WINDOWS ? resolveNodeServerScript() : null;
@@ -264,23 +260,16 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
       `${extraEnvStr})}).unref()`;
     Bun.spawnSync(['node', '-e', launcherCode], { stdio: ['ignore', 'ignore', 'ignore'] });
   } else {
-    // macOS/Linux: Bun.spawn + unref works correctly. A standalone install
-    // ships a compiled `abx-server` sidecar next to the CLI — spawn it directly
-    // (no bun runtime or source tree needed). Dev and an explicit
-    // BROWSE_SERVER_SCRIPT override run the script through bun.
-    const serverBin = resolveServerBinary();
-    let serverCmd: string[];
-    if (serverBin && !process.env.BROWSE_SERVER_SCRIPT) {
-      serverCmd = [serverBin];
-    } else if (SERVER_SCRIPT) {
-      serverCmd = ['bun', 'run', SERVER_SCRIPT];
-    } else {
+    // macOS/Linux: Bun.spawn + unref works correctly. The server runs under
+    // bun (from a shipped abx-server.js bundle on a standalone install, or
+    // src/server.ts in dev) — see resolveServerScript. bun is a runtime
+    // dependency of the Homebrew formula.
+    if (!SERVER_SCRIPT) {
       throw new Error(
-        'Cannot locate the abx server: no abx-server binary next to the CLI and no server.ts source. ' +
-          'Reinstall abx, or set BROWSE_SERVER_SCRIPT to a server.ts path.',
+        'Cannot locate the abx server bundle. Reinstall abx, or set BROWSE_SERVER_SCRIPT.',
       );
     }
-    proc = Bun.spawn(serverCmd, {
+    proc = Bun.spawn(['bun', 'run', SERVER_SCRIPT], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...extraEnv },
     });

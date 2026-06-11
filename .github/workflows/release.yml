@@ -73,25 +73,30 @@ jobs:
       - name: Install deps
         run: bun install --frozen-lockfile
 
-      - name: Build universal binaries (cli + sidecar server)
+      - name: Build CLI (universal) + server bundle + vendored deps
         env:
           NEXT: ${{ needs.bump.outputs.next }}
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: |
           set -euo pipefail
-          mkdir -p out
-          # CLI (thin client) and server (sidecar; externalize Playwright's
-          # optional electron/chromium-bidi deps abx never uses) for each arch.
-          bun build --compile --target=bun-darwin-arm64 src/cli.ts --outfile out/abx-arm64
-          bun build --compile --target=bun-darwin-x64  src/cli.ts --outfile out/abx-x64
-          bun build --compile --target=bun-darwin-arm64 --external electron --external chromium-bidi src/server.ts --outfile out/srv-arm64
-          bun build --compile --target=bun-darwin-x64  --external electron --external chromium-bidi src/server.ts --outfile out/srv-x64
-          lipo -create out/abx-arm64 out/abx-x64 -output out/abx
-          lipo -create out/srv-arm64 out/srv-x64 -output out/abx-server
-          chmod +x out/abx out/abx-server
-          got=$(out/abx --version | tr -d '[:space:]')
+          mkdir -p pkg
+          # Thin CLI (no Playwright) → universal binary.
+          bun build --compile --target=bun-darwin-arm64 src/cli.ts --outfile /tmp/abx-arm64
+          bun build --compile --target=bun-darwin-x64  src/cli.ts --outfile /tmp/abx-x64
+          lipo -create /tmp/abx-arm64 /tmp/abx-x64 -output pkg/abx
+          chmod +x pkg/abx
+          # Server → bun bundle; Playwright stays external (it reads its package
+          # files from node_modules at runtime, so it can't be compiled/inlined).
+          bun build src/server.ts --target bun --external playwright --external playwright-core --outfile pkg/abx-server.js
+          # Vendored runtime deps WITHOUT browsers — `abx install-browser`
+          # fetches Chromium at first use.
+          cp package.json bun.lock pkg/
+          (cd pkg && bun install --production --frozen-lockfile)
+          rm -f pkg/package.json pkg/bun.lock
+          # Sanity: CLI reports the tagged version.
+          got=$(pkg/abx --version | tr -d '[:space:]')
           [ "$got" = "$NEXT" ] || { echo "version mismatch: binary=$got tag=$NEXT"; exit 1; }
-          lipo -archs out/abx
-          lipo -archs out/abx-server
+          lipo -archs pkg/abx
 
       - name: Package tarball
         id: pkg
@@ -100,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           name="abx-${NEXT}-macos-universal.tar.gz"
-          tar -C out -czf "$name" abx abx-server
+          tar -C pkg -czf "$name" abx abx-server.js node_modules
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "sha=$(shasum -a 256 "$name" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 

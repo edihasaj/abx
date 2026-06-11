@@ -14,7 +14,7 @@
     "abx": "./dist/abx"
   },
   "scripts": {
-    "build": "bun build --compile src/cli.ts --outfile dist/abx && bun build --compile --external electron --external chromium-bidi src/server.ts --outfile dist/abx-server && bun build src/live.ts --target node --format esm --packages external --outfile dist/live.mjs && chmod +x dist/abx dist/abx-server",
+    "build": "bun build --compile src/cli.ts --outfile dist/abx && bun build src/server.ts --target bun --external playwright --external playwright-core --outfile dist/abx-server.js && bun build src/live.ts --target node --format esm --packages external --outfile dist/live.mjs && chmod +x dist/abx",
     "dev": "bun run src/cli.ts",
     "server": "bun run src/server.ts"
   },
