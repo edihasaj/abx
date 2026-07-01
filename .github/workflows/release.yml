@@ -88,6 +88,8 @@ jobs:
           # Server → bun bundle; Playwright stays external (it reads its package
           # files from node_modules at runtime, so it can't be compiled/inlined).
           bun build src/server.ts --target bun --external playwright --external playwright-core --outfile pkg/abx-server.js
+          # Live-Chrome driver → node ESM bundle; runs under node against libexec/node_modules.
+          bun build src/live.ts --target node --format esm --packages external --outfile pkg/live.mjs
           # Vendored runtime deps WITHOUT browsers — `abx install-browser`
           # fetches Chromium at first use.
           cp package.json bun.lock pkg/
@@ -105,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           name="abx-${NEXT}-macos-universal.tar.gz"
-          tar -C pkg -czf "$name" abx abx-server.js node_modules
+          tar -C pkg -czf "$name" abx abx-server.js live.mjs node_modules
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "sha=$(shasum -a 256 "$name" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 

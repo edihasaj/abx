@@ -911,7 +911,11 @@ function resolveLiveScript(): { runtime: 'node'; script: string } {
   if (!metaDir.includes('$bunfs')) {
     candidates.push(path.resolve(metaDir, '..', 'dist', 'live.mjs'));
   }
-  candidates.push(path.resolve(path.dirname(process.execPath), 'live.mjs'));
+  const execDir = path.dirname(process.execPath);
+  // Homebrew lays it out as bin/abx + libexec/live.mjs (+ libexec/node_modules,
+  // which live.mjs needs to resolve Playwright at runtime).
+  candidates.push(path.resolve(execDir, '..', 'libexec', 'live.mjs'));
+  candidates.push(path.resolve(execDir, 'live.mjs')); // flat tarball layout
   for (const c of candidates) {
     if (fs.existsSync(c)) return { runtime: 'node', script: c };
   }
