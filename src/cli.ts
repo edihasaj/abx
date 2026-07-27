@@ -17,7 +17,10 @@ import { resolveConfig, ensureStateDir, readVersionHash, stateRoot } from './con
 import { parseProxyConfig, computeConfigHash, ProxyConfigError } from './proxy-config';
 import { redactProxyUrl } from './proxy-redact';
 import { VERSION } from './version';
-import { buildWindowsServerLauncher } from './windows-launcher';
+import {
+  buildWindowsServerLauncher,
+  findBrowserInstaller,
+} from './windows-launcher';
 
 const config = resolveConfig();
 const IS_WINDOWS = process.platform === 'win32';
@@ -920,27 +923,31 @@ async function dispatchLive(args: string[]): Promise<never> {
  * Chrome — when neither runtime is present.
  */
 function installBrowser(): number {
-  const runners: Array<[string, string[]]> = [
-    ['bunx', ['playwright', 'install', 'chromium']],
-    ['npx', ['--yes', 'playwright', 'install', 'chromium']],
-  ];
-  for (const [bin, args] of runners) {
-    const which = Bun.spawnSync(['sh', '-c', `command -v ${bin}`]);
-    if (which.exitCode !== 0) continue;
-    console.error(`[abx] installing Chromium via ${bin}…`);
-    const res = Bun.spawnSync([bin, ...args], { stdout: 'inherit', stderr: 'inherit' });
+  const found = findBrowserInstaller(['bunx', 'npx'], (name) => Bun.which(name));
+  if (found) {
+    const args =
+      found.name === 'bunx'
+        ? ['playwright', 'install', 'chromium']
+        : ['--yes', 'playwright', 'install', 'chromium'];
+    console.error(`[abx] installing Chromium via ${found.name}…`);
+    const res = Bun.spawnSync([found.executable, ...args], {
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
     if (res.exitCode === 0) {
       console.error('[abx] Chromium ready. Run `abx goto <url>` to verify.');
       return 0;
     }
-    console.error(`[abx] ${bin} playwright install failed (exit ${res.exitCode}).`);
+    console.error(
+      `[abx] ${found.name} playwright install failed (exit ${res.exitCode}).`,
+    );
     return res.exitCode ?? 1;
   }
   console.error(
     '[abx] No bun or npx on PATH to fetch Chromium. Options:\n' +
-      '  • install bun (brew install bun) or node, then re-run `abx install-browser`\n' +
+      '  • install Bun or Node.js, then re-run `abx install-browser`\n' +
       '  • or point abx at an existing browser:\n' +
-      '      export ABX_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"',
+      '      set ABX_CHROMIUM_PATH to a Chrome or Chromium executable',
   );
   return 1;
 }

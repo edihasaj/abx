@@ -10,3 +10,14 @@ export function buildWindowsServerLauncher(
     `${extraEnvironmentJson})}).unref()`
   );
 }
+
+export function findBrowserInstaller(
+  candidates: string[],
+  which: (name: string) => string | null,
+): { name: string; executable: string } | null {
+  for (const name of candidates) {
+    const executable = which(name);
+    if (executable) return { name, executable };
+  }
+  return null;
+}
