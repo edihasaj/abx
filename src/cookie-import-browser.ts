@@ -35,12 +35,50 @@
  *   └──────────────────────────────────────────────────────────────────┘
  */
 
-import { Database } from 'bun:sqlite';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { TEMP_DIR } from './platform';
+
+interface CookieDatabase {
+  query(sql: string): {
+    all(...params: unknown[]): unknown[];
+  };
+  close(): void;
+}
+
+interface CookieDatabaseConstructor {
+  new(path: string, options?: { readonly?: boolean }): CookieDatabase;
+}
+
+const Database: CookieDatabaseConstructor = await (async () => {
+  if (typeof Bun.version === 'string') {
+    return (await import('bun:sqlite')).Database;
+  }
+
+  const { DatabaseSync } = await import('node:sqlite');
+  return class NodeCookieDatabase implements CookieDatabase {
+    private readonly database: InstanceType<typeof DatabaseSync>;
+
+    constructor(path: string, options?: { readonly?: boolean }) {
+      this.database = new DatabaseSync(path, {
+        readOnly: options?.readonly ?? false,
+      });
+    }
+
+    query(sql: string) {
+      const statement = this.database.prepare(sql);
+      return {
+        all: (...params: unknown[]) => statement.all(...params),
+      };
+    }
+
+    close(): void {
+      this.database.close();
+    }
+  };
+})();
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -384,7 +422,7 @@ function getBrowserMatch(browser: BrowserInfo, profile: string): BrowserMatch {
 
 // ─── Internal: SQLite Access ────────────────────────────────────
 
-function openDb(dbPath: string, browserName: string): Database {
+function openDb(dbPath: string, browserName: string): CookieDatabase {
   // On Windows, Chrome holds exclusive WAL locks even when we open readonly.
   // The readonly open may "succeed" but return empty results because the WAL
   // (where all actual data lives) can't be replayed. Always use the copy
@@ -408,7 +446,7 @@ function openDb(dbPath: string, browserName: string): Database {
   }
 }
 
-function openDbFromCopy(dbPath: string, browserName: string): Database {
+function openDbFromCopy(dbPath: string, browserName: string): CookieDatabase {
   // Use os.tmpdir() instead of hardcoded /tmp for cross-platform support (#708)
   const tmpPath = path.join(os.tmpdir(), `browse-cookies-${browserName.toLowerCase()}-${crypto.randomUUID()}.db`);
   try {

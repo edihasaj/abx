@@ -79,6 +79,29 @@ const SERVER_SCRIPT: string | null = (() => {
   }
 })();
 
+export function resolveNodeServerScript(
+  metaDir: string = import.meta.dir,
+  execPath: string = process.execPath
+): string | null {
+  if (!metaDir.includes('$bunfs')) {
+    const distScript = path.resolve(metaDir, '..', 'dist', 'server-node.mjs');
+    if (fs.existsSync(distScript)) return distScript;
+  }
+  if (execPath) {
+    const adjacent = path.resolve(path.dirname(execPath), 'server-node.mjs');
+    if (fs.existsSync(adjacent)) return adjacent;
+  }
+  return null;
+}
+
+const NODE_SERVER_SCRIPT = IS_WINDOWS ? resolveNodeServerScript() : null;
+
+if (IS_WINDOWS && !NODE_SERVER_SCRIPT) {
+  throw new Error(
+    'server-node.mjs not found. Run `bun run build` to generate the Windows server bundle.'
+  );
+}
+
 interface ServerState {
   pid: number;
   port: number;
@@ -223,19 +246,9 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
     // Windows: Bun.spawn() + proc.unref() doesn't truly detach on Windows —
     // when the CLI exits, the server dies with it. Use Node's child_process.spawn
     // with { detached: true } to launch the shipped Bun server bundle.
-    if (!SERVER_SCRIPT) {
-      throw new Error(
-        'Cannot locate the abx server bundle. Reinstall abx, or set BROWSE_SERVER_SCRIPT.',
-      );
-    }
-    const bunPath = Bun.which('bun');
-    if (!bunPath) {
-      throw new Error('bun not found on PATH; install Bun before starting abx on Windows.');
-    }
     const extraEnvStr = JSON.stringify({ BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...(extraEnv || {}) });
     const launcherCode = buildWindowsServerLauncher(
-      bunPath,
-      SERVER_SCRIPT,
+      NODE_SERVER_SCRIPT!,
       extraEnvStr,
     );
     Bun.spawnSync(['node', '-e', launcherCode], { stdio: ['ignore', 'ignore', 'ignore'] });

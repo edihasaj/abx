@@ -7,15 +7,13 @@ import {
 describe('buildWindowsServerLauncher', () => {
   test('detaches Bun with the shipped server bundle', () => {
     const launcher = buildWindowsServerLauncher(
-      'C:\\Program Files\\Bun\\bun.exe',
-      'C:\\Program Files\\abx\\abx-server.js',
+      'C:\\Program Files\\abx\\server-node.mjs',
       '{"BROWSE_PARENT_PID":"0"}',
     );
 
-    expect(launcher).toContain("['run',");
     expect(launcher).toContain('detached:true');
     expect(launcher).toContain('BROWSE_PARENT_PID');
-    expect(launcher).not.toContain('server-node.mjs');
+    expect(launcher).toContain('server-node.mjs');
   });
 
   test('finds installers without a POSIX shell', () => {

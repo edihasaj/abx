@@ -2138,7 +2138,10 @@ async function start() {
     port,
     token: AUTH_TOKEN,
     startedAt: new Date().toISOString(),
-    serverPath: path.resolve(import.meta.dir, 'server.ts'),
+    serverPath: path.resolve(
+      import.meta.dir ?? import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname),
+      'server.ts',
+    ),
     binaryVersion: readVersionHash() || undefined,
     mode: browserManager.getConnectionMode(),
     // D2 daemon-mismatch detection: CLI computes the same hash from its

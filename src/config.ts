@@ -11,6 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { mkdirSecure } from './file-permissions';
 
 export function packageRootFor(
@@ -25,7 +26,11 @@ export function packageRootFor(
 }
 
 export function packageRoot(): string {
-  return packageRootFor(process.execPath, import.meta.dir);
+  const metaDir =
+    import.meta.dir ??
+    import.meta.dirname ??
+    path.dirname(fileURLToPath(import.meta.url));
+  return packageRootFor(process.execPath, metaDir);
 }
 
 /** Single state root — everything abx persists lives here. */
