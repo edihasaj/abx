@@ -13,13 +13,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { mkdirSecure } from './file-permissions';
 
-export function packageRoot(): string {
-  const execPath = process.execPath;
+export function packageRootFor(
+  execPath: string,
+  metaDir: string,
+): string {
   const execName = path.basename(execPath);
-  if (execName === 'abx') {
+  if (path.parse(execName).name === 'abx') {
     return path.resolve(path.dirname(execPath), '..');
   }
-  return path.resolve(import.meta.dir, '..');
+  return path.resolve(metaDir, '..');
+}
+
+export function packageRoot(): string {
+  return packageRootFor(process.execPath, import.meta.dir);
 }
 
 /** Single state root — everything abx persists lives here. */
