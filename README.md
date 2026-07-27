@@ -12,8 +12,6 @@ vmlab's `abx` transport drives this for web verification.
 
 ## Install
 
-macOS 13+.
-
 ```sh
 # Homebrew (recommended) — universal binary, auto-updates with `brew upgrade`
 brew install edihasaj/abx/abx
@@ -36,6 +34,10 @@ From source:
 git clone https://github.com/edihasaj/abx && cd abx
 bun install && bun run build      # → dist/abx
 ```
+
+On Windows, install Bun and Node.js first, then build `dist/abx.exe`,
+`dist/abx-server.js`, and `dist/live.mjs`. The CLI launches the server bundle
+through Bun in a detached process so browser state survives the invoking shell.
 
 ## Quickstart
 

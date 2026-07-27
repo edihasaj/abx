@@ -17,6 +17,7 @@ import { resolveConfig, ensureStateDir, readVersionHash, stateRoot } from './con
 import { parseProxyConfig, computeConfigHash, ProxyConfigError } from './proxy-config';
 import { redactProxyUrl } from './proxy-redact';
 import { VERSION } from './version';
+import { buildWindowsServerLauncher } from './windows-launcher';
 
 const config = resolveConfig();
 const IS_WINDOWS = process.platform === 'win32';
@@ -74,38 +75,6 @@ const SERVER_SCRIPT: string | null = (() => {
     return null;
   }
 })();
-
-/**
- * On Windows, resolve the Node.js-compatible server bundle.
- * Falls back to null if not found (server will use Bun instead).
- */
-export function resolveNodeServerScript(
-  metaDir: string = import.meta.dir,
-  execPath: string = process.execPath
-): string | null {
-  // Dev mode
-  if (!metaDir.includes('$bunfs')) {
-    const distScript = path.resolve(metaDir, '..', 'dist', 'server-node.mjs');
-    if (fs.existsSync(distScript)) return distScript;
-  }
-
-  // Compiled binary: browse/dist/browse → browse/dist/server-node.mjs
-  if (execPath) {
-    const adjacent = path.resolve(path.dirname(execPath), 'server-node.mjs');
-    if (fs.existsSync(adjacent)) return adjacent;
-  }
-
-  return null;
-}
-
-const NODE_SERVER_SCRIPT = IS_WINDOWS ? resolveNodeServerScript() : null;
-
-// On Windows, hard-fail if server-node.mjs is missing — the Bun path is known broken.
-if (IS_WINDOWS && !NODE_SERVER_SCRIPT) {
-  throw new Error(
-    'server-node.mjs not found. Run `bun run build` to generate the Windows server bundle.'
-  );
-}
 
 interface ServerState {
   pid: number;
@@ -247,17 +216,25 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
   // server's own parseInt at server.ts:760.
   const parentPid = parseInt(process.env.BROWSE_PARENT_PID || '', 10) === 0 ? '0' : String(process.pid);
 
-  if (IS_WINDOWS && NODE_SERVER_SCRIPT) {
+  if (IS_WINDOWS) {
     // Windows: Bun.spawn() + proc.unref() doesn't truly detach on Windows —
     // when the CLI exits, the server dies with it. Use Node's child_process.spawn
-    // with { detached: true } instead, which is the gold standard for Windows
-    // process independence. Credit: PR #191 by @fqueiro.
+    // with { detached: true } to launch the shipped Bun server bundle.
+    if (!SERVER_SCRIPT) {
+      throw new Error(
+        'Cannot locate the abx server bundle. Reinstall abx, or set BROWSE_SERVER_SCRIPT.',
+      );
+    }
+    const bunPath = Bun.which('bun');
+    if (!bunPath) {
+      throw new Error('bun not found on PATH; install Bun before starting abx on Windows.');
+    }
     const extraEnvStr = JSON.stringify({ BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...(extraEnv || {}) });
-    const launcherCode =
-      `const{spawn}=require('child_process');` +
-      `spawn(process.execPath,[${JSON.stringify(NODE_SERVER_SCRIPT)}],` +
-      `{detached:true,stdio:['ignore','ignore','ignore'],env:Object.assign({},process.env,` +
-      `${extraEnvStr})}).unref()`;
+    const launcherCode = buildWindowsServerLauncher(
+      bunPath,
+      SERVER_SCRIPT,
+      extraEnvStr,
+    );
     Bun.spawnSync(['node', '-e', launcherCode], { stdio: ['ignore', 'ignore', 'ignore'] });
   } else {
     // macOS/Linux: Bun.spawn + unref works correctly. The server runs under
