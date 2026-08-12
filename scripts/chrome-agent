@@ -12,6 +12,7 @@ CHROME_APP="${CHROME_APP:-/Applications/Google Chrome.app}"
 CHROME_BIN="$CHROME_APP/Contents/MacOS/Google Chrome"
 CDP_URL="http://127.0.0.1:${PORT}"
 PID_FILE="${PROFILE_DIR}/chrome.pid"
+LAUNCH_LABEL="com.edihasaj.agent-chrome"
 
 usage() {
   cat <<EOF
@@ -67,19 +68,27 @@ case "$CMD" in
     echo "chrome-agent: launching dedicated Chrome profile"
     echo "chrome-agent: profile=${PROFILE_DIR}"
     echo "chrome-agent: cdp=${CDP_URL}"
-    nohup "$CHROME_BIN" \
+    # A Chrome process launched straight from SSH can be terminated when that
+    # session closes. Submit it to the signed-in user's launchd domain instead,
+    # so Studio can reliably attach to this dedicated profile after reconnects.
+    launchctl bootout "gui/$(id -u)/${LAUNCH_LABEL}" 2>/dev/null || true
+    launchctl submit -l "$LAUNCH_LABEL" -- "$CHROME_BIN" \
       --user-data-dir="$PROFILE_DIR" \
       --remote-debugging-port="$PORT" \
       --remote-debugging-address=127.0.0.1 \
       --remote-allow-origins='*' \
       --no-first-run \
-      --disable-popup-blocking \
-      >"${PROFILE_DIR}/chrome.log" 2>&1 &
-    echo "$!" > "$PID_FILE"
+      --disable-popup-blocking
     for _ in $(seq 1 30); do
       if endpoint_up; then
-        echo "chrome-agent: ready"
-        exit 0
+        # Chrome may briefly expose CDP before its first launchd-managed
+        # process hands off and exits. Require the endpoint to survive that
+        # handoff so callers never receive a false ready.
+        sleep 2
+        if endpoint_up; then
+          echo "chrome-agent: ready"
+          exit 0
+        fi
       fi
       sleep 0.5
     done
@@ -88,6 +97,7 @@ case "$CMD" in
     ;;
 
   stop)
+    launchctl bootout "gui/$(id -u)/${LAUNCH_LABEL}" 2>/dev/null || true
     if endpoint_up; then
       curl -fsS --connect-timeout 1 "${CDP_URL}/json/close" >/dev/null 2>&1 || true
     fi
