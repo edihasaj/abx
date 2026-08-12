@@ -34,6 +34,23 @@ endpoint_up() {
   curl -fsS --connect-timeout 1 "${CDP_URL}/json/version" >/dev/null 2>&1
 }
 
+launch_job_loaded() {
+  launchctl print "gui/$(id -u)/${LAUNCH_LABEL}" >/dev/null 2>&1
+}
+
+remove_launch_job() {
+  # `launchctl submit` creates a dynamic job. `bootout` alone can return before
+  # that job disappears (or fail for a submitted job), leaving its inferred
+  # keepalive policy to reopen Chrome after the window is closed.
+  launchctl remove "$LAUNCH_LABEL" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/${LAUNCH_LABEL}" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    launch_job_loaded || return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 case "$CMD" in
   -h|--help|help)
     usage
@@ -71,7 +88,10 @@ case "$CMD" in
     # A Chrome process launched straight from SSH can be terminated when that
     # session closes. Submit it to the signed-in user's launchd domain instead,
     # so Studio can reliably attach to this dedicated profile after reconnects.
-    launchctl bootout "gui/$(id -u)/${LAUNCH_LABEL}" 2>/dev/null || true
+    remove_launch_job || {
+      echo "chrome-agent: could not remove the previous launchd job" >&2
+      exit 1
+    }
     launchctl submit -l "$LAUNCH_LABEL" -- "$CHROME_BIN" \
       --user-data-dir="$PROFILE_DIR" \
       --remote-debugging-port="$PORT" \
@@ -92,12 +112,13 @@ case "$CMD" in
       fi
       sleep 0.5
     done
+    remove_launch_job || true
     echo "chrome-agent: launched, but CDP never came up; see ${PROFILE_DIR}/chrome.log" >&2
     exit 1
     ;;
 
   stop)
-    launchctl bootout "gui/$(id -u)/${LAUNCH_LABEL}" 2>/dev/null || true
+    remove_launch_job || true
     if endpoint_up; then
       curl -fsS --connect-timeout 1 "${CDP_URL}/json/close" >/dev/null 2>&1 || true
     fi
@@ -109,7 +130,15 @@ case "$CMD" in
       rm -f "$PID_FILE"
     fi
     pkill -f "Google Chrome.*--user-data-dir=${PROFILE_DIR}" 2>/dev/null || true
-    echo "chrome-agent: stopped"
+    for _ in $(seq 1 20); do
+      if ! launch_job_loaded && ! endpoint_up; then
+        echo "chrome-agent: stopped"
+        exit 0
+      fi
+      sleep 0.1
+    done
+    echo "chrome-agent: failed to stop launchd job or CDP endpoint" >&2
+    exit 1
     ;;
 
   *)
