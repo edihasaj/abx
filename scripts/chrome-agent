@@ -13,6 +13,7 @@ CHROME_BIN="$CHROME_APP/Contents/MacOS/Google Chrome"
 CDP_URL="http://127.0.0.1:${PORT}"
 PID_FILE="${PROFILE_DIR}/chrome.pid"
 LAUNCH_LABEL="com.edihasaj.agent-chrome"
+LAUNCH_PLIST="${PROFILE_DIR}/${LAUNCH_LABEL}.plist"
 
 usage() {
   cat <<EOF
@@ -38,10 +39,42 @@ launch_job_loaded() {
   launchctl print "gui/$(id -u)/${LAUNCH_LABEL}" >/dev/null 2>&1
 }
 
+write_launch_plist() {
+  cat >"$LAUNCH_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LAUNCH_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${CHROME_BIN}</string>
+    <string>--user-data-dir=${PROFILE_DIR}</string>
+    <string>--remote-debugging-port=${PORT}</string>
+    <string>--remote-debugging-address=127.0.0.1</string>
+    <string>--remote-allow-origins=*</string>
+    <string>--no-first-run</string>
+    <string>--disable-popup-blocking</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <!-- Restart only when Chrome dies unexpectedly. A clean quit (exit 0) is
+       the user closing the window on purpose; respawning there made the
+       profile impossible to close. -->
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>${PROFILE_DIR}/chrome.log</string>
+  <key>StandardErrorPath</key><string>${PROFILE_DIR}/chrome.log</string>
+</dict>
+</plist>
+PLIST
+}
+
 remove_launch_job() {
-  # `launchctl submit` creates a dynamic job. `bootout` alone can return before
-  # that job disappears (or fail for a submitted job), leaving its inferred
-  # keepalive policy to reopen Chrome after the window is closed.
+  # Two shapes to clear: the bootstrapped LaunchAgent this script writes today,
+  # and the `launchctl submit` dynamic job older versions created. `bootout`
+  # alone can return before a submitted job disappears (or fail for one),
+  # leaving its inferred keepalive policy to reopen Chrome after every quit.
   launchctl remove "$LAUNCH_LABEL" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/${LAUNCH_LABEL}" 2>/dev/null || true
   for _ in $(seq 1 20); do
@@ -86,19 +119,25 @@ case "$CMD" in
     echo "chrome-agent: profile=${PROFILE_DIR}"
     echo "chrome-agent: cdp=${CDP_URL}"
     # A Chrome process launched straight from SSH can be terminated when that
-    # session closes. Submit it to the signed-in user's launchd domain instead,
-    # so Studio can reliably attach to this dedicated profile after reconnects.
+    # session closes. Bootstrap it into the signed-in user's launchd domain
+    # instead, so Studio can reliably attach to this dedicated profile after
+    # reconnects.
+    #
+    # Deliberately NOT `launchctl submit`: submitted jobs are KeepAlive
+    # unconditionally and cannot be configured otherwise, so quitting the
+    # Chrome window relaunched it immediately — the window could not be
+    # closed, only the job removed. A bootstrapped plist with
+    # KeepAlive.SuccessfulExit=false keeps the crash-restart behaviour while
+    # letting a deliberate quit (exit 0) stay quit.
     remove_launch_job || {
       echo "chrome-agent: could not remove the previous launchd job" >&2
       exit 1
     }
-    launchctl submit -l "$LAUNCH_LABEL" -- "$CHROME_BIN" \
-      --user-data-dir="$PROFILE_DIR" \
-      --remote-debugging-port="$PORT" \
-      --remote-debugging-address=127.0.0.1 \
-      --remote-allow-origins='*' \
-      --no-first-run \
-      --disable-popup-blocking
+    write_launch_plist
+    launchctl bootstrap "gui/$(id -u)" "$LAUNCH_PLIST" 2>/dev/null || {
+      echo "chrome-agent: could not bootstrap ${LAUNCH_LABEL}" >&2
+      exit 1
+    }
     for _ in $(seq 1 30); do
       if endpoint_up; then
         # Chrome may briefly expose CDP before its first launchd-managed
