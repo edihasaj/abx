@@ -76,7 +76,9 @@ After `snapshot`, elements get `@e1`, `@e2`… handles usable as selectors
 
 `abx live <cmd>` drives your real, logged-in Chrome over the DevTools protocol
 (port 9222) instead of the headless Chromium — useful for authenticated
-sessions. Start Chrome with remote debugging first (see `scripts/`).
+sessions. Start Chrome with remote debugging first (see `scripts/`). Live mode
+supports tab creation with `abx live newtab [url]`; the new tab becomes the
+target of the next live command.
 
 ## Configuration
 

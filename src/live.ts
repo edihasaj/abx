@@ -14,11 +14,13 @@ import { wrapUntrustedContent } from './commands';
 
 const CDP_URL = process.env.ABX_LIVE_CDP_URL || 'http://127.0.0.1:9222';
 
-interface ResolvedTab {
+export interface ResolvedTab {
   browser: Browser;
   context: BrowserContext;
   page: Page;
 }
+
+type OutputWriter = (chunk: string) => void;
 
 async function connect(): Promise<Browser> {
   try {
@@ -50,7 +52,12 @@ function shouldWrap(cmd: string): boolean {
   return cmd === 'text' || cmd === 'html' || cmd === 'snapshot';
 }
 
-async function runCommand(tab: ResolvedTab, cmd: string, args: string[]): Promise<void> {
+export async function runLiveCommand(
+  tab: ResolvedTab,
+  cmd: string,
+  args: string[],
+  write: OutputWriter = chunk => process.stdout.write(chunk),
+): Promise<void> {
   const { page } = tab;
   let output = '';
   let raw = false;
@@ -175,6 +182,38 @@ async function runCommand(tab: ResolvedTab, cmd: string, args: string[]): Promis
       raw = true;
       break;
     }
+    case 'newtab': {
+      let url: string | undefined;
+      let jsonMode = false;
+      for (const arg of args) {
+        if (arg === '--json') jsonMode = true;
+        else if (!url) url = arg;
+      }
+
+      const newPage = await tab.context.newPage();
+      if (url) {
+        await newPage.goto(url, { waitUntil: 'domcontentloaded' });
+      }
+
+      let tabId = 0;
+      let found = false;
+      for (const context of tab.browser.contexts()) {
+        for (const candidate of context.pages()) {
+          if (candidate === newPage) {
+            found = true;
+            break;
+          }
+          tabId += 1;
+        }
+        if (found) break;
+      }
+
+      output = jsonMode
+        ? JSON.stringify({ tabId, url: url ?? null })
+        : `Opened tab ${tabId}${url ? ` → ${url}` : ''}`;
+      raw = true;
+      break;
+    }
     case 'cookies': {
       const cookies = await tab.context.cookies();
       output = JSON.stringify(cookies, null, 2);
@@ -184,15 +223,15 @@ async function runCommand(tab: ResolvedTab, cmd: string, args: string[]): Promis
     default: {
       throw new Error(
         `[abx] Live mode does not yet support: ${cmd}\n` +
-        `Available: status, url, goto, reload, back, forward, text, html, snapshot, click, fill, press, type, js, screenshot, tabs, cookies`,
+        `Available: status, url, goto, reload, back, forward, text, html, snapshot, click, fill, press, type, js, screenshot, tabs, newtab, cookies`,
       );
     }
   }
 
   if (!raw && shouldWrap(cmd)) {
-    process.stdout.write(wrapUntrustedContent(output, page.url()) + '\n');
+    write(wrapUntrustedContent(output, page.url()) + '\n');
   } else {
-    process.stdout.write(output + '\n');
+    write(output + '\n');
   }
 }
 
@@ -203,7 +242,7 @@ export async function runLive(argv: string[]): Promise<number> {
   try {
     browser = await connect();
     const tab = await activeTab(browser);
-    await runCommand(tab, cmd, args);
+    await runLiveCommand(tab, cmd, args);
     return 0;
   } catch (err: any) {
     process.stderr.write((err.message ?? String(err)) + '\n');
