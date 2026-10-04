@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { safeUnlink, safeUnlinkQuiet, safeKill, isProcessAlive } from './error-handling';
+import { resolveLiveRuntime } from './live-runtime';
 import { writeSecureFile, mkdirSecure } from './file-permissions';
 import { resolveConfig, ensureStateDir, readVersionHash, stateRoot } from './config';
 import { parseProxyConfig, computeConfigHash, ProxyConfigError } from './proxy-config';
@@ -895,9 +896,10 @@ async function handlePairAgent(state: ServerState, args: string[]): Promise<void
 }
 
 // ─── Main ──────────────────────────────────────────────────────
-function resolveLiveScript(): { runtime: 'node'; script: string } {
+function resolveLiveScript(): { runtime: string; script: string } {
+  const runtime = resolveLiveRuntime(process.env, path.dirname(process.execPath), fs.existsSync);
   if (process.env.ABX_LIVE_SCRIPT) {
-    return { runtime: 'node', script: process.env.ABX_LIVE_SCRIPT };
+    return { runtime, script: process.env.ABX_LIVE_SCRIPT };
   }
   const candidates: string[] = [];
   const metaDir = import.meta.dir;
@@ -910,7 +912,7 @@ function resolveLiveScript(): { runtime: 'node'; script: string } {
   candidates.push(path.resolve(execDir, '..', 'libexec', 'live.mjs'));
   candidates.push(path.resolve(execDir, 'live.mjs')); // flat tarball layout
   for (const c of candidates) {
-    if (fs.existsSync(c)) return { runtime: 'node', script: c };
+    if (fs.existsSync(c)) return { runtime, script: c };
   }
   throw new Error(
     "Cannot find dist/live.mjs. Run 'bun run build' in the browser package, or set ABX_LIVE_SCRIPT.",

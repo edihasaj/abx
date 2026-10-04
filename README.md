@@ -85,6 +85,8 @@ target of the next live command.
 - `ABX_CHROMIUM_PATH` — launch a specific Chromium/Chrome binary instead of
   Playwright's download.
 - `PLAYWRIGHT_BROWSERS_PATH` — where the Chromium build lives (Playwright default).
+- `ABX_NODE` — Node binary that runs `abx live`. Homebrew installs link
+  `node@24` (LTS) for it, so you rarely need this; otherwise `node` from PATH.
 - `--proxy <url>` / `--headed` — per-invocation global flags.
 
 ## License
