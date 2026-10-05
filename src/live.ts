@@ -6,10 +6,14 @@
  * (use scripts/chrome-debug to launch).
  *
  * Each call connects fresh, runs the command, disconnects. No daemon.
+ * Chrome lists tabs in a different order on each connection, so commands find
+ * their tab by Chrome's target id (see resolveTab), never by position.
  */
 
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { wrapUntrustedContent } from './commands';
 
 const CDP_URL = process.env.ABX_LIVE_CDP_URL || 'http://127.0.0.1:9222';
@@ -34,10 +38,86 @@ async function connect(): Promise<Browser> {
   }
 }
 
-async function activeTab(browser: Browser): Promise<ResolvedTab> {
+interface ListedTab extends ResolvedTab {
+  id: string;
+}
+
+/** Chrome's target id for a tab. Unlike a list position, it never changes while the tab is open. */
+async function tabId(context: BrowserContext, page: Page): Promise<string> {
+  const session = await context.newCDPSession(page);
+  try {
+    const { targetInfo } = await session.send('Target.getTargetInfo');
+    return targetInfo.targetId;
+  } finally {
+    await session.detach().catch(() => {});
+  }
+}
+
+async function listTabs(browser: Browser): Promise<ListedTab[]> {
+  const tabs: ListedTab[] = [];
+  for (const context of browser.contexts()) {
+    for (const page of context.pages()) {
+      tabs.push({ browser, context, page, id: await tabId(context, page) });
+    }
+  }
+  return tabs;
+}
+
+/** Finds a tab by its id, or by a unique id prefix of at least four characters. */
+async function findTab(browser: Browser, wanted: string): Promise<ListedTab | null> {
+  const key = wanted.trim().toUpperCase();
+  const tabs = await listTabs(browser);
+  const exact = tabs.find(tab => tab.id === key);
+  if (exact || key.length < 4) return exact ?? null;
+  const matches = tabs.filter(tab => tab.id.startsWith(key));
+  if (matches.length > 1) throw new Error(`[abx] Tab id ${wanted} matches ${matches.length} tabs; use more of the id.`);
+  return matches[0] ?? null;
+}
+
+function missingTab(wanted: string): Error {
+  return new Error(`[abx] No open tab has id ${wanted}. Run abx live tabs to list them.`);
+}
+
+// Chrome lists tabs in a different order on every connection, so newtab and tab
+// remember their tab here and later live commands act on it while it is open.
+function pinFile(): string {
+  return path.join(os.tmpdir(), `abx-live-${CDP_URL.replace(/[^a-z0-9]+/gi, '-')}.tab`);
+}
+
+function readPin(): string {
+  try {
+    return fs.readFileSync(pinFile(), 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function writePin(id: string): void {
+  fs.writeFileSync(pinFile(), id, { mode: 0o600 });
+}
+
+function clearPin(): void {
+  try {
+    fs.unlinkSync(pinFile());
+  } catch {}
+}
+
+/** The tab a live command acts on: --tab or ABX_LIVE_TAB, else the remembered tab, else the last one listed. */
+export async function resolveTab(browser: Browser, wanted?: string): Promise<ResolvedTab> {
   const contexts = browser.contexts();
   if (contexts.length === 0) {
     throw new Error('[abx] Chrome is reachable but has no open windows.');
+  }
+  if (wanted) {
+    const tab = await findTab(browser, wanted);
+    if (!tab) throw missingTab(wanted);
+    return tab;
+  }
+  const pinned = readPin();
+  if (pinned) {
+    const tab = await findTab(browser, pinned);
+    if (tab) return tab;
+    clearPin();
   }
   const context = contexts[contexts.length - 1];
   const pages = context.pages();
@@ -46,6 +126,21 @@ async function activeTab(browser: Browser): Promise<ResolvedTab> {
     return { browser, context, page };
   }
   return { browser, context, page: pages[pages.length - 1] };
+}
+
+/** Splits a leading --tab <id> (or --tab=<id>) from the command; ABX_LIVE_TAB is the default. */
+export function parseLiveArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): { tab?: string; cmd: string; args: string[] } {
+  let tab = env.ABX_LIVE_TAB || undefined;
+  let rest = argv;
+  if (rest[0] === '--tab') {
+    tab = rest[1];
+    if (!tab) throw new Error('Usage: abx live --tab <id> <cmd> [args]');
+    rest = rest.slice(2);
+  } else if (rest[0]?.startsWith('--tab=')) {
+    tab = rest[0].slice('--tab='.length);
+    rest = rest.slice(1);
+  }
+  return { tab, cmd: rest[0] ?? '', args: rest.slice(1) };
 }
 
 function shouldWrap(cmd: string): boolean {
@@ -72,6 +167,7 @@ export async function runLiveCommand(
         `Connected: ${CDP_URL}\n` +
         `Contexts: ${contexts.length}\n` +
         `Tabs: ${tabCount}\n` +
+        `Active tab: ${await tabId(tab.context, page)}\n` +
         `Active URL: ${page.url()}`;
       raw = true;
       break;
@@ -204,14 +300,24 @@ export async function runLiveCommand(
       break;
     }
     case 'tabs': {
-      const lines: string[] = [];
-      let i = 0;
-      for (const ctx of tab.browser.contexts()) {
-        for (const p of ctx.pages()) {
-          lines.push(`${i++}\t${p.url()}\t${await p.title()}`);
-        }
+      const rows: Array<{ id: string; url: string; title: string; current: boolean }> = [];
+      for (const listed of await listTabs(tab.browser)) {
+        rows.push({ id: listed.id, url: listed.page.url(), title: await listed.page.title(), current: listed.page === page });
       }
-      output = lines.join('\n');
+      output = args.includes('--json')
+        ? JSON.stringify(rows)
+        : rows.map(row => `${row.current ? '→ ' : '  '}[${row.id}] ${row.title || '(untitled)'} — ${row.url}`).join('\n');
+      raw = true;
+      break;
+    }
+    case 'tab': {
+      const wanted = args[0];
+      if (!wanted) throw new Error('Usage: abx live tab <id>');
+      const found = await findTab(tab.browser, wanted);
+      if (!found) throw missingTab(wanted);
+      await found.page.bringToFront();
+      writePin(found.id);
+      output = `Switched to tab ${found.id} → ${found.page.url()}`;
       raw = true;
       break;
     }
@@ -224,26 +330,29 @@ export async function runLiveCommand(
       }
 
       const newPage = await tab.context.newPage();
+      // Remember the tab before navigating, so a slow page still gets the next command.
+      const id = await tabId(tab.context, newPage);
+      writePin(id);
       if (url) {
         await newPage.goto(url, { waitUntil: 'domcontentloaded' });
       }
 
-      let tabId = 0;
-      let found = false;
-      for (const context of tab.browser.contexts()) {
-        for (const candidate of context.pages()) {
-          if (candidate === newPage) {
-            found = true;
-            break;
-          }
-          tabId += 1;
-        }
-        if (found) break;
-      }
-
       output = jsonMode
-        ? JSON.stringify({ tabId, url: url ?? null })
-        : `Opened tab ${tabId}${url ? ` → ${url}` : ''}`;
+        ? JSON.stringify({ tabId: id, url: url ?? null })
+        : `Opened tab ${id}${url ? ` → ${url}` : ''}`;
+      raw = true;
+      break;
+    }
+    case 'closetab': {
+      const wanted = args[0];
+      let target: ListedTab | null = { ...tab, id: await tabId(tab.context, page) };
+      if (wanted) {
+        target = await findTab(tab.browser, wanted);
+        if (!target) throw missingTab(wanted);
+      }
+      await target.page.close();
+      if (readPin() === target.id) clearPin();
+      output = `Closed tab ${target.id}`;
       raw = true;
       break;
     }
@@ -256,7 +365,7 @@ export async function runLiveCommand(
     default: {
       throw new Error(
         `[abx] Live mode does not yet support: ${cmd}\n` +
-        `Available: status, url, goto, reload, back, forward, text, html, snapshot, click, fill, upload, select, wait, press, type, js, screenshot, tabs, newtab, cookies`,
+        `Available: status, url, goto, reload, back, forward, text, html, snapshot, click, fill, upload, select, wait, press, type, js, screenshot, tabs, tab, newtab, closetab, cookies`,
       );
     }
   }
@@ -269,12 +378,11 @@ export async function runLiveCommand(
 }
 
 export async function runLive(argv: string[]): Promise<number> {
-  const cmd = argv[0] ?? '';
-  const args = argv.slice(1);
   let browser: Browser | null = null;
   try {
+    const { tab: wanted, cmd, args } = parseLiveArgs(argv);
     browser = await connect();
-    const tab = await activeTab(browser);
+    const tab = await resolveTab(browser, wanted);
     await runLiveCommand(tab, cmd, args);
     return 0;
   } catch (err: any) {

@@ -76,9 +76,17 @@ After `snapshot`, elements get `@e1`, `@e2`… handles usable as selectors
 
 `abx live <cmd>` drives your real, logged-in Chrome over the DevTools protocol
 (port 9222) instead of the headless Chromium — useful for authenticated
-sessions. Start Chrome with remote debugging first (see `scripts/`). Live mode
-supports tab creation with `abx live newtab [url]`; the new tab becomes the
-target of the next live command. Forms work too: `abx live upload <selector>
+sessions. Start Chrome with remote debugging first (see `scripts/`).
+
+Tabs have ids from Chrome that stay the same while the tab is open; Chrome's tab
+order changes between calls, so live mode never relies on it. `abx live newtab
+[url]` prints the new tab's id, and later live commands act on that tab until it
+closes. `abx live tabs` lists ids (`--json` for scripts), `abx live tab <id>`
+switches to another tab, and `abx live closetab [id]` closes one. For a single
+command, `abx live --tab <id> <cmd>` (or `ABX_LIVE_TAB`) picks the tab; four or
+more leading characters of an id are enough when they are unique.
+
+Forms work too: `abx live upload <selector>
 <file>...` sets files on a file input (hidden inputs included), `abx live select
 <selector> <value-or-label>` picks an option, and `abx live wait <selector>
 [timeout-ms]` waits for an element. `abx live screenshot --full <path>` captures the
@@ -89,6 +97,9 @@ whole page.
 - `ABX_CHROMIUM_PATH` — launch a specific Chromium/Chrome binary instead of
   Playwright's download.
 - `PLAYWRIGHT_BROWSERS_PATH` — where the Chromium build lives (Playwright default).
+- `ABX_LIVE_CDP_URL` — Chrome DevTools endpoint for `abx live` (default
+  `http://127.0.0.1:9222`).
+- `ABX_LIVE_TAB` — tab id for `abx live` commands, like `--tab`.
 - `ABX_NODE` — Node binary that runs `abx live`. Homebrew installs link
   `node@24` (LTS) for it, so you rarely need this; otherwise `node` from PATH.
 - `--proxy <url>` / `--headed` — per-invocation global flags.

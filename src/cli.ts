@@ -1023,6 +1023,7 @@ Snapshot:       snapshot [-i] [-c] [-d N] [-s sel] [-D] [-a] [-o path] [-C]
 Compare:        diff <url1> <url2>
 Live Chrome:    live <cmd> [args]    drive your real Chrome via CDP (:9222)
                                      run scripts/chrome-debug to enable
+                live --tab <id> <cmd>  act on one tab (ids from live tabs)
 Multi-step:     chain (reads JSON from stdin)
 Tabs:           tabs | tab <id> | newtab [url] | closetab [id]
 Server:         status | cookie <n>=<v> | header <n>:<v>
