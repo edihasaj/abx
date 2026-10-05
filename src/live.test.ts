@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { runLiveCommand, type ResolvedTab } from './live';
 
@@ -65,5 +68,55 @@ describe('live newtab', () => {
       tabId: 1,
       url: 'https://example.com/',
     });
+  });
+});
+
+
+function makeFormTab() {
+  const calls: Array<{ method: string; selector: string; value: unknown }> = [];
+  const page = {
+    url: () => 'https://form.example/',
+    locator: (selector: string) => ({
+      first: () => ({
+        setInputFiles: async (files: string[]) => { calls.push({ method: 'setInputFiles', selector, value: files }); },
+        selectOption: async (value: string) => { calls.push({ method: 'selectOption', selector, value }); return [value]; },
+        waitFor: async (options: { timeout: number }) => { calls.push({ method: 'waitFor', selector, value: options.timeout }); },
+      }),
+    }),
+  } as unknown as Page;
+  const context = { pages: () => [page] } as unknown as BrowserContext;
+  const browser = { contexts: () => [context] } as unknown as Browser;
+  return { calls, tab: { browser, context, page } satisfies ResolvedTab };
+}
+
+describe('live form controls', () => {
+  test('uploads existing files to a file input, including several at once', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abx-live-'));
+    const logo = path.join(dir, 'logo.png');
+    const shot = path.join(dir, 'shot.png');
+    fs.writeFileSync(logo, 'x');
+    fs.writeFileSync(shot, 'y');
+    const fixture = makeFormTab();
+    let output = '';
+    await runLiveCommand(fixture.tab, 'upload', ['input[type=file]', logo, shot], chunk => { output += chunk; });
+    expect(fixture.calls).toEqual([{ method: 'setInputFiles', selector: 'input[type=file]', value: [logo, shot] }]);
+    expect(output).toBe('Uploaded 2 files to input[type=file]\n');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('refuses missing files before touching the page', async () => {
+    const fixture = makeFormTab();
+    await expect(runLiveCommand(fixture.tab, 'upload', ['input', '/nope/missing.png'], () => {})).rejects.toThrow('File not found');
+    expect(fixture.calls).toEqual([]);
+  });
+
+  test('selects an option by value or label and waits for elements', async () => {
+    const fixture = makeFormTab();
+    await runLiveCommand(fixture.tab, 'select', ['select[name=topic]', 'Developer', 'Tools'], () => {});
+    await runLiveCommand(fixture.tab, 'wait', ['#done', '5000'], () => {});
+    expect(fixture.calls).toEqual([
+      { method: 'selectOption', selector: 'select[name=topic]', value: 'Developer Tools' },
+      { method: 'waitFor', selector: '#done', value: 5000 },
+    ]);
   });
 });

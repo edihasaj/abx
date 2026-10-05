@@ -78,7 +78,10 @@ After `snapshot`, elements get `@e1`, `@e2`… handles usable as selectors
 (port 9222) instead of the headless Chromium — useful for authenticated
 sessions. Start Chrome with remote debugging first (see `scripts/`). Live mode
 supports tab creation with `abx live newtab [url]`; the new tab becomes the
-target of the next live command.
+target of the next live command. Forms work too: `abx live upload <selector>
+<file>...` sets files on a file input (hidden inputs included), `abx live select
+<selector> <value-or-label>` picks an option, and `abx live wait <selector>
+[timeout-ms]` waits for an element.
 
 ## Configuration
 

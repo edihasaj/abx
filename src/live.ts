@@ -139,6 +139,37 @@ export async function runLiveCommand(
       raw = true;
       break;
     }
+    case 'upload': {
+      const [sel, ...files] = args;
+      if (!sel || files.length === 0) throw new Error('Usage: abx live upload <selector> <file> [file...]');
+      if (sel.startsWith('@e')) throw new Error('[abx] @e refs are not yet supported in live mode — use a CSS selector.');
+      const missing = files.filter(file => !fs.existsSync(file));
+      if (missing.length) throw new Error(`[abx] File not found: ${missing.join(', ')}`);
+      // Works on hidden file inputs too, which most upload widgets use.
+      await page.locator(sel).first().setInputFiles(files);
+      output = `Uploaded ${files.length} file${files.length === 1 ? '' : 's'} to ${sel}`;
+      raw = true;
+      break;
+    }
+    case 'select': {
+      const sel = args[0];
+      const value = args.slice(1).join(' ');
+      if (!sel || !value) throw new Error('Usage: abx live select <selector> <value-or-label>');
+      if (sel.startsWith('@e')) throw new Error('[abx] @e refs are not yet supported in live mode — use a CSS selector.');
+      const chosen = await page.locator(sel).first().selectOption(value);
+      output = `Selected ${chosen.join(', ') || value} in ${sel}`;
+      raw = true;
+      break;
+    }
+    case 'wait': {
+      const sel = args[0];
+      if (!sel) throw new Error('Usage: abx live wait <selector> [timeout-ms]');
+      const timeout = Number(args[1] || 15000);
+      await page.locator(sel).first().waitFor({ timeout: Number.isFinite(timeout) ? timeout : 15000 });
+      output = `Found ${sel}`;
+      raw = true;
+      break;
+    }
     case 'press': {
       const key = args[0];
       if (!key) throw new Error('Usage: abx live press <key>');
@@ -223,7 +254,7 @@ export async function runLiveCommand(
     default: {
       throw new Error(
         `[abx] Live mode does not yet support: ${cmd}\n` +
-        `Available: status, url, goto, reload, back, forward, text, html, snapshot, click, fill, press, type, js, screenshot, tabs, newtab, cookies`,
+        `Available: status, url, goto, reload, back, forward, text, html, snapshot, click, fill, upload, select, wait, press, type, js, screenshot, tabs, newtab, cookies`,
       );
     }
   }
