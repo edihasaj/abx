@@ -120,3 +120,18 @@ describe('live form controls', () => {
     ]);
   });
 });
+
+
+describe('live screenshot', () => {
+  test('captures the full page when asked', async () => {
+    const shots: Array<{ path: string; fullPage: boolean }> = [];
+    const page = { url: () => 'https://form.example/', screenshot: async (options: { path: string; fullPage: boolean }) => { shots.push(options); } } as unknown as Page;
+    const context = { pages: () => [page] } as unknown as BrowserContext;
+    const tab = { browser: { contexts: () => [context] } as unknown as Browser, context, page };
+    let output = '';
+    await runLiveCommand(tab, 'screenshot', ['--full', '/tmp/form.png'], chunk => { output += chunk; });
+    await runLiveCommand(tab, 'screenshot', ['/tmp/view.png'], () => {});
+    expect(shots).toEqual([{ path: '/tmp/form.png', fullPage: true }, { path: '/tmp/view.png', fullPage: false }]);
+    expect(output).toBe('Screenshot saved: /tmp/form.png (full page)\n');
+  });
+});

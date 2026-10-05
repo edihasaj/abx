@@ -81,7 +81,8 @@ supports tab creation with `abx live newtab [url]`; the new tab becomes the
 target of the next live command. Forms work too: `abx live upload <selector>
 <file>...` sets files on a file input (hidden inputs included), `abx live select
 <selector> <value-or-label>` picks an option, and `abx live wait <selector>
-[timeout-ms]` waits for an element.
+[timeout-ms]` waits for an element. `abx live screenshot --full <path>` captures the
+whole page.
 
 ## Configuration
 

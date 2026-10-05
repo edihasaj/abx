@@ -195,9 +195,11 @@ export async function runLiveCommand(
       break;
     }
     case 'screenshot': {
-      const path = args[0] || `/tmp/abx-live-${Date.now()}.png`;
-      await page.screenshot({ path });
-      output = `Screenshot saved: ${path}`;
+      // --full captures the whole page, so a long form can be checked in one image.
+      const fullPage = args.includes('--full');
+      const path = args.find(arg => arg !== '--full') || `/tmp/abx-live-${Date.now()}.png`;
+      await page.screenshot({ path, fullPage });
+      output = `Screenshot saved: ${path}${fullPage ? ' (full page)' : ''}`;
       raw = true;
       break;
     }
