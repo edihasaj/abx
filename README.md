@@ -33,6 +33,7 @@ From source:
 ```sh
 git clone https://github.com/edihasaj/abx && cd abx
 bun install && bun run build      # → dist/abx
+bun test                         # unit tests and isolated daemon lifecycle checks
 ```
 
 On Windows, install Bun and Node.js first, then build `dist/abx.exe`,
@@ -52,6 +53,10 @@ abx stop                          # shut the daemon down
 
 State (current page, cookies, tabs) persists between calls via the background
 server, so multi-step flows don't re-launch the browser each time.
+
+`abx stop` stops only the recorded daemon. When none is running, it succeeds
+without launching a browser. Shutdown can close the HTTP connection before
+replying; the CLI checks that the daemon exited and never restarts it.
 
 ## Commands
 

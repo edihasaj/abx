@@ -18,6 +18,7 @@ import { resolveConfig, ensureStateDir, readVersionHash, stateRoot } from './con
 import { parseProxyConfig, computeConfigHash, ProxyConfigError } from './proxy-config';
 import { redactProxyUrl } from './proxy-redact';
 import { VERSION } from './version';
+import { stopExistingServer } from './stop-server';
 import {
   buildWindowsServerLauncher,
   findBrowserInstaller,
@@ -1036,11 +1037,24 @@ Refs:           After 'snapshot', use @e1, @e2... as selectors:
     process.exit(0);
   }
 
-  // One-time cleanup of legacy /tmp state files
-  cleanupLegacyState();
-
   const command = args[0];
   const commandArgs = args.slice(1);
+
+  // Stop never starts, upgrades, or retries a daemon. Its HTTP connection can
+  // close during shutdown, so confirm process exit instead of restarting it.
+  if (command === 'stop') {
+    const existingState = readState();
+    const stopped = await stopExistingServer(existingState);
+    const currentState = readState();
+    if (existingState && currentState?.pid === existingState.pid && currentState.token === existingState.token) {
+      safeUnlinkQuiet(config.stateFile);
+    }
+    console.log(stopped ? 'Server stopped' : 'Server not running');
+    return;
+  }
+
+  // One-time cleanup of legacy /tmp state files
+  cleanupLegacyState();
 
   // ─── Headed Connect (pre-server command) ────────────────────
   // connect must be handled BEFORE ensureServer() because it needs

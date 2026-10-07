@@ -73,6 +73,9 @@ jobs:
       - name: Install deps
         run: bun install --frozen-lockfile
 
+      - name: Test
+        run: bun test
+
       - name: Build CLI (universal) + server bundle + vendored deps
         env:
           NEXT: ${{ needs.bump.outputs.next }}
