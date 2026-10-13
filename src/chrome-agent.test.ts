@@ -10,6 +10,43 @@ function stub(dir: string, name: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
+test("chrome-agent default profile stays outside retired project checkouts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "abx-chrome-default-"));
+  const bin = join(dir, "bin");
+  Bun.spawnSync(["mkdir", "-p", bin]);
+  stub(bin, "curl", "exit 1");
+  try {
+    const result = spawnSync(resolve("scripts/chrome-agent"), ["status"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: dir,
+        PATH: `${bin}:${process.env.PATH}`,
+        AGENT_CHROME_PROFILE_DIR: "",
+      },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain(
+      `profile=${join(dir, "Library/Application Support/Agent Chrome")}`,
+    );
+    expect(existsSync(join(dir, "Projects/farm"))).toBe(false);
+
+    const override = spawnSync(resolve("scripts/chrome-agent"), ["status"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: dir,
+        PATH: `${bin}:${process.env.PATH}`,
+        AGENT_CHROME_PROFILE_DIR: join(dir, "custom-profile"),
+      },
+    });
+    expect(override.status).toBe(1);
+    expect(override.stdout).toContain(`profile=${join(dir, "custom-profile")}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("chrome-agent stop removes a submitted launchd job and its CDP process", () => {
   const dir = mkdtempSync(join(tmpdir(), "abx-chrome-agent-"));
   const bin = join(dir, "bin");

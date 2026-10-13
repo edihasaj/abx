@@ -83,6 +83,11 @@ After `snapshot`, elements get `@e1`, `@e2`… handles usable as selectors
 (port 9222) instead of the headless Chromium — useful for authenticated
 sessions. Start Chrome with remote debugging first (see `scripts/`).
 
+For a dedicated agent profile, use `scripts/chrome-agent start`. Its default
+storage is `~/Library/Application Support/Agent Chrome`, outside any project
+checkout. Set `AGENT_CHROME_PROFILE_DIR` for an explicit override. The launcher
+does not use or relaunch your daily Chrome profile.
+
 Tabs have ids from Chrome that stay the same while the tab is open; Chrome's tab
 order changes between calls, so live mode never relies on it. `abx live newtab
 [url]` prints the new tab's id, and later live commands act on that tab until it
