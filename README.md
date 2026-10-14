@@ -10,7 +10,20 @@ abx is one corner of an agent fleet alongside
 [**guiport**](https://github.com/edihasaj/guiport) (native desktop driver).
 vmlab's `abx` transport drives this for web verification.
 
-## Install
+## CI and explicit releases
+
+Development pushes and pull requests validate on hosted Linux. Paid native Mac
+packaging is available only through the manual `Release` workflow on `main`,
+with its typed `publish` checkbox enabled. The checkbox defaults off; a default
+dispatch neither bumps a version nor allocates a Mac nor publishes anything.
+An affirmative dispatch retains the existing version, tag, universal binaries,
+GitHub release and Homebrew update steps.
+
+```sh
+gh workflow run release.yml -R edihasaj/abx --ref main -f publish=true
+```
+
+## Installation
 
 ```sh
 # Homebrew (recommended) — universal binary, auto-updates with `brew upgrade`

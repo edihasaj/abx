@@ -1,12 +1,14 @@
 name: Release
 
-# Auto-bumps the patch in src/version.ts on every push to main that isn't a
-# release commit, tags it, then builds the universal macOS binaries, attaches
-# them to the GitHub release, and bumps the Homebrew tap. Mirrors the guiport
-# pipeline, adapted for Bun's two-binary (cli + sidecar server) layout.
+# Explicitly bump, tag, build native binaries and publish. Ordinary pushes
+# use the cheap Linux workflow and never allocate the Mac release runner.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Bump the version, build on macOS, and publish the GitHub/Homebrew release
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -14,7 +16,7 @@ concurrency:
 
 jobs:
   bump:
-    if: "github.actor != 'github-actions[bot]'"
+    if: github.repository == 'edihasaj/abx' && github.ref == 'refs/heads/main' && inputs.publish == true
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -57,6 +59,7 @@ jobs:
   # (needs:) because a GITHUB_TOKEN-pushed tag doesn't trigger on:push:tags.
   release:
     needs: bump
+    if: github.repository == 'edihasaj/abx' && github.ref == 'refs/heads/main' && inputs.publish == true
     runs-on: macos-14
     permissions:
       contents: write
