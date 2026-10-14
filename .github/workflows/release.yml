@@ -5,6 +5,10 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      run_native:
+        description: Explicitly authorize paid macOS packaging from production
+        type: boolean
+        default: false
       publish:
         description: Bump the version, build on macOS, and publish the GitHub/Homebrew release
         type: boolean
@@ -16,7 +20,7 @@ concurrency:
 
 jobs:
   bump:
-    if: github.repository == 'edihasaj/abx' && github.ref == 'refs/heads/main' && inputs.publish == true
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'edihasaj/abx' && github.ref == 'refs/heads/production' && inputs.run_native == true && inputs.publish == true
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -51,7 +55,7 @@ jobs:
           git add src/version.ts
           git commit -m "chore(release): v${NEXT}"
           git tag "v${NEXT}"
-          git push origin HEAD:main
+          git push origin HEAD:production
           git push origin "v${NEXT}"
 
   # Build the universal macOS binaries for the freshly-tagged version, attach a
@@ -59,7 +63,7 @@ jobs:
   # (needs:) because a GITHUB_TOKEN-pushed tag doesn't trigger on:push:tags.
   release:
     needs: bump
-    if: github.repository == 'edihasaj/abx' && github.ref == 'refs/heads/main' && inputs.publish == true
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'edihasaj/abx' && github.ref == 'refs/heads/production' && inputs.run_native == true && inputs.publish == true
     runs-on: macos-14
     permissions:
       contents: write

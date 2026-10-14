@@ -1,5 +1,7 @@
 # abx
 
+For paused native builds and explicit production requests, see [CI cost policy](docs/ci-cost-policy.md).
+
 **Fast headless browser for AI coding agents.** A persistent [Bun](https://bun.sh)
 daemon over [Playwright](https://playwright.dev) Chromium, driven by a terse
 CLI — navigate, read, click, snapshot, screenshot, and replay, with state held
@@ -13,14 +15,14 @@ vmlab's `abx` transport drives this for web verification.
 ## CI and explicit releases
 
 Development pushes and pull requests validate on hosted Linux. Paid native Mac
-packaging is available only through the manual `Release` workflow on `main`,
-with its typed `publish` checkbox enabled. The checkbox defaults off; a default
+packaging is available only through the manual `Release` workflow on `production`,
+with both typed `run_native` and `publish` checkboxes enabled. The checkbox defaults off; a default
 dispatch neither bumps a version nor allocates a Mac nor publishes anything.
 An affirmative dispatch retains the existing version, tag, universal binaries,
 GitHub release and Homebrew update steps.
 
 ```sh
-gh workflow run release.yml -R edihasaj/abx --ref main -f publish=true
+gh workflow run release.yml -R edihasaj/abx --ref production -f run_native=true -f publish=true
 ```
 
 ## Installation
