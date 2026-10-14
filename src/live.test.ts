@@ -77,7 +77,8 @@ describe('live tabs', () => {
   });
 
   afterEach(() => {
-    process.env.TMPDIR = savedTmp;
+    if (savedTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmp;
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
