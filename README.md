@@ -121,7 +121,7 @@ whole page.
   `http://127.0.0.1:9222`).
 - `ABX_LIVE_TAB` — tab id for `abx live` commands, like `--tab`.
 - `ABX_NODE` — Node binary that runs `abx live`. Homebrew installs link
-  `node@24` (LTS) for it, so you rarely need this; otherwise `node` from PATH.
+  Homebrew's current `node` for it, so you rarely need this; otherwise `node` from PATH.
 - `--proxy <url>` / `--headed` — per-invocation global flags.
 
 ## License

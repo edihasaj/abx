@@ -150,6 +150,7 @@ jobs:
             -e "s#^  url \".*\"#  url \"${url}\"#" \
             -e "s#^  sha256 \".*\"#  sha256 \"${SHA}\"#" \
             -e "s#^  version \".*\"#  version \"${NEXT}\"#" \
+            -e "/^  revision [0-9]+$/d" \
             -e "s#assert_match \"[^\"]*\", shell_output#assert_match \"${NEXT}\", shell_output#" \
             "$f"
           cd tap
