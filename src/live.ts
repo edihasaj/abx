@@ -192,13 +192,19 @@ export async function runLiveCommand(
       break;
     }
     case 'back': {
-      await page.goBack({ waitUntil: 'domcontentloaded' });
+      await page.goBack({ waitUntil: 'commit' });
+      // Back/forward-cache restores have an already-ready document and need
+      // not emit DOMContentLoaded again over CDP.
+      await page.waitForFunction(() => document.readyState === 'complete'
+        || ((performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.domContentLoadedEventEnd ?? 0) > 0);
       output = `Back → ${page.url()}`;
       raw = true;
       break;
     }
     case 'forward': {
-      await page.goForward({ waitUntil: 'domcontentloaded' });
+      await page.goForward({ waitUntil: 'commit' });
+      await page.waitForFunction(() => document.readyState === 'complete'
+        || ((performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.domContentLoadedEventEnd ?? 0) > 0);
       output = `Forward → ${page.url()}`;
       raw = true;
       break;

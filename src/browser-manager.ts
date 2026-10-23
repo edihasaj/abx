@@ -27,6 +27,13 @@ export type { RefEntry };
 // Re-export TabSession for consumers
 export { TabSession };
 
+/** Preserve the explicit executable override for both headless and headed launch paths. */
+export function chromiumExecutableOverride(
+  env: Record<string, string | undefined> = process.env,
+): { executablePath?: string } {
+  return env.ABX_CHROMIUM_PATH ? { executablePath: env.ABX_CHROMIUM_PATH } : {};
+}
+
 export interface BrowserState {
   cookies: Cookie[];
   pages: Array<{
@@ -218,6 +225,10 @@ export class BrowserManager {
       console.log(`[abx] Extensions loaded from: ${extensionsDir}`);
     }
 
+    // Keep the documented explicit-browser override consistent in headless and
+    // headed modes. This is especially useful when Playwright's cache is absent.
+    const executablePath = chromiumExecutableOverride();
+
     this.browser = await chromium.launch({
       headless: useHeadless,
       // On Windows, Chromium's sandbox fails when the server is spawned through
@@ -225,6 +236,7 @@ export class BrowserManager {
       // browsing user-specified URLs has marginal sandbox benefit.
       chromiumSandbox: process.platform !== 'win32',
       ...(launchArgs.length > 0 ? { args: launchArgs } : {}),
+      ...executablePath,
       ...(this.proxyConfig ? { proxy: this.proxyConfig } : {}),
     });
 

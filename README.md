@@ -35,7 +35,11 @@ brew install edihasaj/abx/abx
 abx install-browser
 ```
 
-`install-browser` shells out to `bunx`/`npx` to run Playwright's own installer.
+`install-browser` first runs the Playwright CLI vendored with abx, so it downloads
+the exact Chromium revision the daemon uses. If that CLI is unavailable it pins
+the `bunx`/`npx` fallback to abx's Playwright version, and only reports success
+after Playwright's headless executable exists. `ABX_CHROMIUM_PATH` remains an
+escape hatch for an existing Chrome or Chromium executable.
 No Node/Bun on the machine? Either install one (`brew install bun`) and re-run,
 or point abx at an existing browser:
 
@@ -66,8 +70,9 @@ abx screenshot shot.png           # capture
 abx stop                          # shut the daemon down
 ```
 
-State (current page, cookies, tabs) persists between calls via the background
-server, so multi-step flows don't re-launch the browser each time.
+State (current page, cookies, tabs) persists between calls via the detached background
+server, even after the invoking command exits, so multi-step flows do not relaunch
+the browser each time.
 
 `abx stop` stops only the recorded daemon. When none is running, it succeeds
 without launching a browser. Shutdown can close the HTTP connection before
@@ -105,6 +110,12 @@ closes. `abx live tabs` lists ids (`--json` for scripts), `abx live tab <id>`
 switches to another tab, and `abx live closetab [id]` closes one. For a single
 command, `abx live --tab <id> <cmd>` (or `ABX_LIVE_TAB`) picks the tab; four or
 more leading characters of an id are enough when they are unique.
+
+Live Back and Forward also handle cached documents that do not emit another load
+event, while waiting for deferred page initialization on fresh history loads.
+Run `ABX_TEST_CDP_URL=http://127.0.0.1:9223 bun test src/live-history.test.ts`
+against the dedicated agent Chrome to verify both paths. The tests close only
+the tabs and private browser they create.
 
 Forms work too: `abx live upload <selector>
 <file>...` sets files on a file input (hidden inputs included), `abx live select
