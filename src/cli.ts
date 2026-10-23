@@ -23,6 +23,11 @@ import {
   buildWindowsServerLauncher,
   findBrowserInstaller,
 } from './windows-launcher';
+import {
+  isHeadlessBrowserReady,
+  playwrightFallbackCommand,
+  resolveVendoredPlaywright,
+} from './browser-installer';
 
 const config = resolveConfig();
 const IS_WINDOWS = process.platform === 'win32';
@@ -255,7 +260,10 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
     );
     Bun.spawnSync(['node', '-e', launcherCode], { stdio: ['ignore', 'ignore', 'ignore'] });
   } else {
-    // macOS/Linux: Bun.spawn + unref works correctly. The server runs under
+    // Bun's detached process group survives the short-lived CLI process (notably
+    // native Codex exec calls). Ignored stdio is essential: piped descriptors
+    // can otherwise keep the parent lifecycle coupled to the daemon.
+    // The server runs under
     // bun (from a shipped abx-server.js bundle on a standalone install, or
     // src/server.ts in dev) — see resolveServerScript. bun is a runtime
     // dependency of the Homebrew formula.
@@ -265,7 +273,8 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
       );
     }
     proc = Bun.spawn(['bun', 'run', SERVER_SCRIPT], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore'],
       env: { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...extraEnv },
     });
     proc.unref();
@@ -283,27 +292,16 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
     await Bun.sleep(100);
   }
 
-  // Server didn't start in time — try to get error details
-  if (proc?.stderr) {
-    // macOS/Linux: read stderr from the spawned process
-    const reader = proc.stderr.getReader();
-    const { value } = await reader.read();
-    if (value) {
-      const errText = new TextDecoder().decode(value);
-      throw new Error(`Server failed to start:\n${errText}`);
+  // All launchers detach with ignored stdio, so the server persists startup
+  // failures itself for the client to report without re-coupling lifecycles.
+  const errorLogPath = path.join(config.stateDir, 'browse-startup-error.log');
+  try {
+    const errorLog = fs.readFileSync(errorLogPath, 'utf-8').trim();
+    if (errorLog) {
+      throw new Error(`Server failed to start:\n${errorLog}`);
     }
-  } else {
-    // Windows: check startup error log (server writes errors to disk since
-    // stderr is unavailable due to stdio: 'ignore' for detachment)
-    const errorLogPath = path.join(config.stateDir, 'browse-startup-error.log');
-    try {
-      const errorLog = fs.readFileSync(errorLogPath, 'utf-8').trim();
-      if (errorLog) {
-        throw new Error(`Server failed to start:\n${errorLog}`);
-      }
-    } catch (e: any) {
-      if (e.code !== 'ENOENT') throw e;
-    }
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') throw e;
   }
   throw new Error(`Server failed to start within ${MAX_START_WAIT / 1000}s`);
 }
@@ -939,25 +937,36 @@ async function dispatchLive(args: string[]): Promise<never> {
  * Chrome — when neither runtime is present.
  */
 function installBrowser(): number {
-  const found = findBrowserInstaller(['bunx', 'npx'], (name) => Bun.which(name));
-  if (found) {
-    const args =
-      found.name === 'bunx'
-        ? ['playwright', 'install', 'chromium']
-        : ['--yes', 'playwright', 'install', 'chromium'];
-    console.error(`[abx] installing Chromium via ${found.name}…`);
-    const res = Bun.spawnSync([found.executable, ...args], {
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
-    if (res.exitCode === 0) {
+  const install = resolveVendoredPlaywright({ serverScript: SERVER_SCRIPT, metaDir: import.meta.dir, execPath: process.execPath });
+  if (process.env.ABX_CHROMIUM_PATH && isHeadlessBrowserReady(install)) {
+    console.error('[abx] Chromium ready at ABX_CHROMIUM_PATH.');
+    return 0;
+  }
+
+  let command: string[] | null = null;
+  if (install.cliPath) {
+    const runtime = Bun.which('bun') || Bun.which('node');
+    if (runtime) command = [runtime, install.cliPath, 'install', 'chromium'];
+  }
+  if (!command) {
+    const found = findBrowserInstaller(['bunx', 'npx'], (name) => Bun.which(name));
+    if (found) {
+      command = playwrightFallbackCommand(found.name, found.executable, install.version);
+    }
+  }
+  if (command) {
+    console.error(`[abx] installing Chromium with Playwright ${install.version}…`);
+    const res = Bun.spawnSync(command, { stdout: 'inherit', stderr: 'inherit' });
+    if (res.exitCode === 0 && isHeadlessBrowserReady(install)) {
       console.error('[abx] Chromium ready. Run `abx goto <url>` to verify.');
       return 0;
     }
-    console.error(
-      `[abx] ${found.name} playwright install failed (exit ${res.exitCode}).`,
-    );
-    return res.exitCode ?? 1;
+    if (res.exitCode === 0) {
+      console.error(`[abx] Playwright completed, but its headless Chromium ${install.headlessShellRevision} executable was not found.`);
+    } else {
+      console.error(`[abx] Playwright ${install.version} install failed (exit ${res.exitCode}).`);
+    }
+    return res.exitCode === 0 ? 1 : (res.exitCode ?? 1);
   }
   console.error(
     '[abx] No bun or npx on PATH to fetch Chromium. Options:\n' +
