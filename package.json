@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "diff": "^7.0.0",
-    "playwright": "^1.58.2",
+    "playwright": "1.63.0",
     "socks": "^2.8.8"
   },
   "devDependencies": {

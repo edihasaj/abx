@@ -10,7 +10,13 @@
  * their tab by Chrome's target id (see resolveTab), never by position.
  */
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type ConnectOverCDPOptions,
+  type Page,
+} from 'playwright';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -26,13 +32,32 @@ export interface ResolvedTab {
 
 type OutputWriter = (chunk: string) => void;
 
-async function connect(): Promise<Browser> {
+/**
+ * How live mode attaches to an already-running Chrome.
+ *
+ * `noDefaults` prevents Playwright from applying context defaults such as
+ * `Browser.setDownloadBehavior` to a profile it does not own. Explicit live
+ * commands still control the selected tabs; attaching alone preserves settings.
+ *
+ * Requires the pinned Playwright 1.63 runtime; `src/live.test.ts` guards the pin.
+ */
+const CONNECT_OPTIONS: ConnectOverCDPOptions = { timeout: 3000, noDefaults: true };
+
+/** The Playwright entry point live mode attaches through; injectable so tests can see the attach options. */
+export interface CdpConnector {
+  connectOverCDP(endpointURL: string, options: ConnectOverCDPOptions): Promise<Browser>;
+}
+
+export async function connect(
+  connector: CdpConnector = chromium,
+  endpointURL: string = CDP_URL,
+): Promise<Browser> {
   try {
-    return await chromium.connectOverCDP(CDP_URL, { timeout: 3000 });
+    return await connector.connectOverCDP(endpointURL, CONNECT_OPTIONS);
   } catch (err: any) {
     const detail = process.env.ABX_LIVE_DEBUG ? `\n[abx] underlying: ${err.message}` : '';
     const msg =
-      `[abx] Cannot reach Chrome at ${CDP_URL}.${detail}\n` +
+      `[abx] Cannot reach Chrome at ${endpointURL}.${detail}\n` +
       `[abx] Run scripts/chrome-debug to relaunch Chrome with the debug port.`;
     throw new Error(msg);
   }

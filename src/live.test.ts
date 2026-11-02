@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { Browser, BrowserContext, Page } from 'playwright';
-import { parseLiveArgs, resolveTab, runLiveCommand, type ResolvedTab } from './live';
+import { chromium, type Browser, type BrowserContext, type ConnectOverCDPOptions, type Page } from 'playwright';
+import { connect, parseLiveArgs, resolveTab, runLiveCommand, type CdpConnector, type ResolvedTab } from './live';
 
 const EXISTING = `A1B2${'0'.repeat(28)}`;
 const OPENED = [`C3D4A${'1'.repeat(27)}`, `C3D4B${'2'.repeat(27)}`];
@@ -213,3 +213,79 @@ describe('live screenshot', () => {
     expect(output).toBe('Screenshot saved: /tmp/form.png (full page)\n');
   });
 });
+
+
+// Attaching to the user's real Chrome. Playwright's own context defaults are the fragile part
+// here: they are writes to a profile abx does not own, so live mode asks for none of them.
+
+describe('live connect', () => {
+  const ATTEMPTED = 'http://127.0.0.1:9223';
+  const CDP_FAILURE = 'Protocol error (Browser.setDownloadBehavior): Browser context management is not supported.';
+
+  function failingConnector(): CdpConnector {
+    return { connectOverCDP: async () => { throw new Error(CDP_FAILURE); } };
+  }
+
+  test('attaches with noDefaults so Playwright leaves the real Chrome profile alone', async () => {
+    const calls: Array<{ url: string; options: ConnectOverCDPOptions }> = [];
+    const connector = {
+      connectOverCDP: async (url: string, options: ConnectOverCDPOptions) => {
+        calls.push({ url, options });
+        return { contexts: () => [] } as unknown as Browser;
+      },
+    } satisfies CdpConnector;
+
+    await connect(connector, ATTEMPTED);
+
+    // noDefaults is what keeps Playwright from sending Browser.setDownloadBehavior for a
+    // context it does not own.
+    expect(calls).toEqual([{ url: ATTEMPTED, options: { timeout: 3000, noDefaults: true } }]);
+  });
+
+  test('a failed attach names Chrome and keeps the CDP error out unless debugging', async () => {
+    const savedDebug = process.env.ABX_LIVE_DEBUG;
+    const attemptedMessage = () =>
+      connect(failingConnector(), ATTEMPTED).catch((err: Error) => err.message);
+    try {
+      delete process.env.ABX_LIVE_DEBUG;
+      expect(await attemptedMessage()).toBe(
+        `[abx] Cannot reach Chrome at ${ATTEMPTED}.\n` +
+        `[abx] Run scripts/chrome-debug to relaunch Chrome with the debug port.`,
+      );
+
+      process.env.ABX_LIVE_DEBUG = '1';
+      expect(await attemptedMessage()).toContain(`[abx] underlying: ${CDP_FAILURE}`);
+    } finally {
+      if (savedDebug === undefined) delete process.env.ABX_LIVE_DEBUG;
+      else process.env.ABX_LIVE_DEBUG = savedDebug;
+    }
+  });
+});
+
+describe('live CDP dependency', () => {
+  // Live mode relies on a Playwright that honours noDefaults over CDP, so the runtime is pinned
+  // rather than left to a floating range.
+  const PINNED_PLAYWRIGHT = '1.63.0';
+
+  test('live mode runs on the pinned Playwright', async () => {
+    const declared = await Bun.file(new URL('../package.json', import.meta.url))
+      .json<{ dependencies: Record<string, string> }>();
+    expect(declared.dependencies.playwright).toBe(PINNED_PLAYWRIGHT);
+
+    const installed = await Bun.file(new URL(import.meta.resolve('playwright/package.json')))
+      .json<{ version: string }>();
+    expect(installed.version).toBe(PINNED_PLAYWRIGHT);
+  });
+});
+
+// Opt-in regression guard against a real Chrome: attach must succeed and find the existing tab.
+// It opens no tabs and closes the connection, so it is safe against a logged-in profile.
+const liveEndpoint = process.env.ABX_TEST_CDP_URL;
+test.skipIf(!liveEndpoint)('attaches to a running real Chrome without reconfiguring it', async () => {
+  const browser = await connect(chromium, liveEndpoint!);
+  try {
+    expect(browser.contexts().length).toBeGreaterThan(0);
+  } finally {
+    await browser.close();
+  }
+}, 15_000);

@@ -103,6 +103,15 @@ After `snapshot`, elements get `@e1`, `@e2`… handles usable as selectors
 (port 9222) instead of the headless Chromium — useful for authenticated
 sessions. Start Chrome with remote debugging first (see `scripts/`).
 
+When attaching, live mode asks Playwright for no context defaults, preserving
+your profile's download behaviour and viewport settings. Explicit live commands
+still act on the selected tabs. This uses the pinned Playwright 1.63 runtime,
+which supports that attachment option over CDP.
+
+Run `ABX_TEST_CDP_URL=http://127.0.0.1:9223 bun test src/live.test.ts` against the
+dedicated agent Chrome to check the attach itself; it opens no tabs and disconnects
+afterwards.
+
 Tabs have ids from Chrome that stay the same while the tab is open; Chrome's tab
 order changes between calls, so live mode never relies on it. `abx live newtab
 [url]` prints the new tab's id, and later live commands act on that tab until it
